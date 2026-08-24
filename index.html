@@ -98,6 +98,7 @@
     const englishEl = document.getElementById('english');
     const statusEl = document.getElementById('status');
     let phrases = [];
+    let playlist = [];
     let currentIndex = 0;
 
     function parseCSV(text) {
@@ -132,8 +133,24 @@
       return rows;
     }
 
-    function showPhrase(index) {
-      const item = phrases[index];
+    function shuffle(items) {
+      const result = [...items];
+      for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+      }
+      return result;
+    }
+
+    function makePlaylist(previousItem) {
+      playlist = shuffle(phrases);
+      if (playlist.length > 1 && previousItem && playlist[0] === previousItem) {
+        [playlist[0], playlist[1]] = [playlist[1], playlist[0]];
+      }
+      currentIndex = 0;
+    }
+
+    function showPhrase(item) {
       koreanEl.textContent = item.korean;
       englishEl.textContent = item.english;
     }
@@ -142,8 +159,10 @@
       if (phrases.length < 2) return;
       phraseEl.classList.add('is-leaving');
       setTimeout(() => {
-        currentIndex = (currentIndex + 1) % phrases.length;
-        showPhrase(currentIndex);
+        const previousItem = playlist[currentIndex];
+        currentIndex += 1;
+        if (currentIndex >= playlist.length) makePlaylist(previousItem);
+        showPhrase(playlist[currentIndex]);
         phraseEl.classList.remove('is-leaving');
         phraseEl.classList.add('is-entering');
         requestAnimationFrame(() => {
@@ -162,7 +181,8 @@
           .map(row => ({ korean: row[0], english: row[1] }));
 
         if (!phrases.length) throw new Error('CSV에 표시할 2열 문구가 없습니다.');
-        showPhrase(currentIndex);
+        makePlaylist();
+        showPhrase(playlist[currentIndex]);
         setInterval(advance, DISPLAY_MS);
       } catch (error) {
         koreanEl.textContent = '문구를 불러올 수 없습니다.';
