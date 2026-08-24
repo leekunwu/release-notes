@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#ffffff" />
+  <meta name="theme-color" content="#fff" />
   <title>Release Notes</title>
-
   <style>
     @font-face {
       font-family: "Sandoll Gothic";
@@ -13,26 +12,17 @@
     }
 
     :root {
-      --side-margin: clamp(24px, 6vw, 86px);
-      --korean-size: clamp(30px, 5.2vw, 72px);
-      --english-size: clamp(26px, 4.8vw, 66px);
-      --transition-duration: 1600ms;
-      --transition-easing: cubic-bezier(.22, 1, .36, 1);
+      --margin: clamp(24px, 6vw, 86px);
+      --ko-size: clamp(30px, 5.2vw, 72px);
+      --en-size: clamp(26px, 4.8vw, 66px);
+      --fade: 2200ms cubic-bezier(.22, 1, .36, 1);
     }
 
-    * {
-      box-sizing: border-box;
-    }
-
-    html,
-    body {
-      min-height: 100%;
-    }
-
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #fff;
       color: #000;
+      background: #fff;
       font-family: "Sandoll Gothic", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
     }
 
@@ -40,258 +30,152 @@
       display: flex;
       align-items: center;
       min-height: 100svh;
-      padding: 8vh var(--side-margin);
+      padding: 8vh var(--margin);
     }
 
-    .phrase-stage {
+    #stage {
       position: relative;
       width: 100%;
-      min-height: calc(
-        var(--korean-size) * 1.15 +
-        var(--english-size) * 1.2 +
-        0.13em
-      );
+      min-height: calc(var(--ko-size) * 1.15 + var(--en-size) * 1.2 + .13em);
     }
 
-    .phrase-layer {
+    .phrase {
       position: absolute;
       inset: 0;
-      width: 100%;
       opacity: 0;
-      filter: blur(8px);
-      transform: translateY(2px) scale(1.006);
+      filter: blur(3px);
+      transform: translateY(1px);
       pointer-events: none;
-      will-change: opacity, filter, transform;
-      transition:
-        opacity var(--transition-duration) var(--transition-easing),
-        filter var(--transition-duration) var(--transition-easing),
-        transform var(--transition-duration) var(--transition-easing);
+      transition: opacity var(--fade), filter var(--fade), transform var(--fade);
     }
 
-    .phrase-layer.is-visible {
+    .phrase.show {
       position: relative;
       opacity: 1;
       filter: blur(0);
-      transform: translateY(0) scale(1);
+      transform: none;
     }
 
-    .phrase-layer.is-exiting {
-      opacity: 0;
-      filter: blur(8px);
-      transform: translateY(-2px) scale(1.006);
-    }
-
-    .ko,
-    .en {
-      margin: 0;
-      text-align: left;
-    }
-
+    p { margin: 0; text-align: left; }
     .ko {
-      font-size: var(--korean-size);
+      font-size: var(--ko-size);
       font-weight: 700;
       line-height: 1.15;
-      letter-spacing: -0.045em;
+      letter-spacing: -.045em;
       word-break: keep-all;
     }
-
     .en {
-      margin-top: 0.13em;
-      font-size: var(--english-size);
-      font-weight: 400;
+      margin-top: .13em;
+      font-size: var(--en-size);
       line-height: 1.2;
-      letter-spacing: -0.015em;
+      letter-spacing: -.015em;
     }
 
     #status {
       position: fixed;
-      left: var(--side-margin);
+      left: var(--margin);
       bottom: 28px;
       color: #555;
       font-size: 14px;
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .phrase-layer {
-        transition: none;
-        filter: none;
-        transform: none;
-      }
+      .phrase { transition: none; filter: none; transform: none; }
     }
   </style>
 </head>
 <body>
   <main>
-    <section class="phrase-stage" aria-live="polite" aria-atomic="true">
-      <div class="phrase-layer is-visible" data-layer="0">
-        <p class="ko"></p>
-        <p class="en"></p>
-      </div>
-
-      <div class="phrase-layer" data-layer="1" aria-hidden="true">
-        <p class="ko"></p>
-        <p class="en"></p>
-      </div>
+    <section id="stage" aria-live="polite" aria-atomic="true">
+      <div class="phrase show"><p class="ko"></p><p class="en"></p></div>
+      <div class="phrase" aria-hidden="true"><p class="ko"></p><p class="en"></p></div>
     </section>
   </main>
-
   <div id="status" role="status"></div>
 
   <script>
-    const CONFIG = {
-      csvPath: './phrases.csv',
-      displayDuration: 8000,
-    };
+    const DISPLAY_MS = 20000;
+    const layers = [...document.querySelectorAll('.phrase')];
+    const status = document.querySelector('#status');
+    let phrases = [], queue = [], active = 0, position = 0;
 
-    const layers = [...document.querySelectorAll('.phrase-layer')];
-    const status = document.getElementById('status');
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    let phrases = [];
-    let playlist = [];
-    let activeLayerIndex = 0;
-    let playlistIndex = 0;
-
-    function parseCSV(text) {
-      const rows = [];
-      let row = [];
-      let field = '';
-      let isQuoted = false;
-
-      for (let index = 0; index < text.length; index += 1) {
-        const character = text[index];
-        const nextCharacter = text[index + 1];
-
-        if (character === '"' && isQuoted && nextCharacter === '"') {
-          field += '"';
-          index += 1;
-        } else if (character === '"') {
-          isQuoted = !isQuoted;
-        } else if (character === ',' && !isQuoted) {
-          row.push(field.trim());
-          field = '';
-        } else if ((character === '\n' || character === '\r') && !isQuoted) {
-          if (character === '\r' && nextCharacter === '\n') index += 1;
-          row.push(field.trim());
-          if (row.some(Boolean)) rows.push(row);
-          row = [];
-          field = '';
-        } else {
-          field += character;
-        }
+    function csv(text) {
+      const rows = [], row = [];
+      let value = '', quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i], next = text[i + 1];
+        if (char === '"' && quoted && next === '"') { value += char; i++; }
+        else if (char === '"') quoted = !quoted;
+        else if (char === ',' && !quoted) { row.push(value.trim()); value = ''; }
+        else if ((char === '\n' || char === '\r') && !quoted) {
+          if (char === '\r' && next === '\n') i++;
+          row.push(value.trim());
+          if (row.some(Boolean)) rows.push(row.splice(0));
+          value = '';
+        } else value += char;
       }
-
-      row.push(field.trim());
+      row.push(value.trim());
       if (row.some(Boolean)) rows.push(row);
       return rows;
     }
 
     function shuffle(items) {
-      const shuffled = [...items];
-
-      for (let index = shuffled.length - 1; index > 0; index -= 1) {
-        const randomIndex = Math.floor(Math.random() * (index + 1));
-        [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+      const result = [...items];
+      for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
       }
-
-      return shuffled;
+      return result;
     }
 
-    function buildPlaylist(previousPhrase) {
-      playlist = shuffle(phrases);
-
-      if (playlist.length > 1 && previousPhrase && playlist[0] === previousPhrase) {
-        [playlist[0], playlist[1]] = [playlist[1], playlist[0]];
-      }
-
-      playlistIndex = 0;
+    function refill(previous) {
+      queue = shuffle(phrases);
+      if (queue.length > 1 && queue[0] === previous) [queue[0], queue[1]] = [queue[1], queue[0]];
+      position = 0;
     }
 
     function nextPhrase() {
-      const currentPhrase = playlist[playlistIndex];
-      playlistIndex += 1;
-
-      if (playlistIndex >= playlist.length) {
-        buildPlaylist(currentPhrase);
-      }
-
-      return playlist[playlistIndex];
+      const previous = queue[position++];
+      if (position === queue.length) refill(previous);
+      return queue[position];
     }
 
-    function renderPhrase(layer, phrase) {
+    function paint(layer, phrase) {
       layer.querySelector('.ko').textContent = phrase.korean;
       layer.querySelector('.en').textContent = phrase.english;
     }
 
-    function transitionTo(phrase) {
-      const outgoingLayer = layers[activeLayerIndex];
-      const incomingLayer = layers[1 - activeLayerIndex];
-
-      renderPhrase(incomingLayer, phrase);
-      incomingLayer.setAttribute('aria-hidden', 'false');
-      outgoingLayer.setAttribute('aria-hidden', 'true');
-
-      incomingLayer.classList.remove('is-visible', 'is-exiting');
-      void incomingLayer.offsetWidth;
-
-      incomingLayer.classList.add('is-visible');
-      outgoingLayer.classList.add('is-exiting');
-      outgoingLayer.classList.remove('is-visible');
-
-      activeLayerIndex = 1 - activeLayerIndex;
+    function change(phrase) {
+      const oldLayer = layers[active];
+      const newLayer = layers[1 - active];
+      paint(newLayer, phrase);
+      newLayer.removeAttribute('aria-hidden');
+      oldLayer.setAttribute('aria-hidden', 'true');
+      newLayer.classList.remove('show');
+      void newLayer.offsetWidth;
+      newLayer.classList.add('show');
+      oldLayer.classList.remove('show');
+      active = 1 - active;
     }
 
-    function scheduleTransition() {
-      window.setTimeout(() => {
-        transitionTo(nextPhrase());
-        scheduleTransition();
-      }, CONFIG.displayDuration);
-    }
-
-    function showError(error) {
-      layers.forEach((layer) => layer.classList.remove('is-visible', 'is-exiting'));
-
-      renderPhrase(layers[0], {
-        korean: '문구를 불러올 수 없습니다.',
-        english: error.message,
-      });
-
-      layers[0].classList.add('is-visible');
-      status.textContent = 'phrases.csv 파일과 CSV 형식을 확인하세요.';
-    }
-
-    async function initialize() {
+    async function start() {
       try {
-        const response = await fetch(CONFIG.csvPath, { cache: 'no-store' });
-
-        if (!response.ok) {
-          throw new Error('phrases.csv 파일을 찾을 수 없습니다.');
-        }
-
-        phrases = parseCSV(await response.text())
-          .filter((row) => row.length >= 2 && row[0] && row[1])
+        const response = await fetch('./phrases.csv', { cache: 'no-store' });
+        if (!response.ok) throw new Error('phrases.csv 파일을 찾을 수 없습니다.');
+        phrases = csv(await response.text())
+          .filter(([ko, en]) => ko && en)
           .map(([korean, english]) => ({ korean, english }));
-
-        if (!phrases.length) {
-          throw new Error('CSV에 표시할 2열 문구가 없습니다.');
-        }
-
-        buildPlaylist();
-        renderPhrase(layers[activeLayerIndex], playlist[playlistIndex]);
-
-        if (phrases.length > 1) {
-          scheduleTransition();
-        }
+        if (!phrases.length) throw new Error('CSV에 표시할 2열 문구가 없습니다.');
+        refill();
+        paint(layers[active], queue[position]);
+        if (phrases.length > 1) setInterval(() => change(nextPhrase()), DISPLAY_MS);
       } catch (error) {
-        showError(error);
+        paint(layers[0], { korean: '문구를 불러올 수 없습니다.', english: error.message });
+        status.textContent = 'phrases.csv 파일과 CSV 형식을 확인하세요.';
       }
     }
 
-    if (reducedMotion) {
-      document.documentElement.style.setProperty('--transition-duration', '0ms');
-    }
-
-    initialize();
+    start();
   </script>
 </body>
 </html>
