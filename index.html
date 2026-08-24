@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#ffffff" />
   <title>Release Notes</title>
+
   <style>
     @font-face {
       font-family: "Sandoll Gothic";
@@ -12,12 +14,20 @@
 
     :root {
       --side-margin: clamp(24px, 6vw, 86px);
-      --primary-size: clamp(30px, 5.2vw, 72px);
-      --secondary-size: clamp(26px, 4.8vw, 66px);
+      --korean-size: clamp(30px, 5.2vw, 72px);
+      --english-size: clamp(26px, 4.8vw, 66px);
+      --transition-duration: 1600ms;
+      --transition-easing: cubic-bezier(.22, 1, .36, 1);
     }
 
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
 
     body {
       margin: 0;
@@ -27,45 +37,69 @@
     }
 
     main {
-      min-height: 100svh;
-      padding: 8vh var(--side-margin);
       display: flex;
       align-items: center;
+      min-height: 100svh;
+      padding: 8vh var(--side-margin);
     }
 
-    #phrase {
+    .phrase-stage {
+      position: relative;
       width: 100%;
-      text-align: left;
+      min-height: calc(
+        var(--korean-size) * 1.15 +
+        var(--english-size) * 1.2 +
+        0.13em
+      );
+    }
+
+    .phrase-layer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      opacity: 0;
+      filter: blur(8px);
+      transform: translateY(2px) scale(1.006);
+      pointer-events: none;
+      will-change: opacity, filter, transform;
+      transition:
+        opacity var(--transition-duration) var(--transition-easing),
+        filter var(--transition-duration) var(--transition-easing),
+        transform var(--transition-duration) var(--transition-easing);
+    }
+
+    .phrase-layer.is-visible {
+      position: relative;
       opacity: 1;
-      transform: translateY(0);
-      will-change: opacity, transform;
-      transition: opacity 1200ms cubic-bezier(.16, 1, .3, 1), transform 1200ms cubic-bezier(.16, 1, .3, 1);
+      filter: blur(0);
+      transform: translateY(0) scale(1);
     }
 
-    #phrase.is-leaving {
+    .phrase-layer.is-exiting {
       opacity: 0;
-      transform: translateY(-8px);
+      filter: blur(8px);
+      transform: translateY(-2px) scale(1.006);
     }
 
-    #phrase.is-entering {
-      opacity: 0;
-      transform: translateY(8px);
+    .ko,
+    .en {
+      margin: 0;
+      text-align: left;
     }
 
     .ko {
-      margin: 0;
-      font-size: var(--primary-size);
+      font-size: var(--korean-size);
       font-weight: 700;
-      line-height: 1.35;
+      line-height: 1.15;
       letter-spacing: -0.045em;
       word-break: keep-all;
     }
 
     .en {
-      margin: 0.13em 0 0;
-      font-size: var(--secondary-size);
+      margin-top: 0.13em;
+      font-size: var(--english-size);
       font-weight: 400;
-      line-height: 1.45;
+      line-height: 1.2;
       letter-spacing: -0.015em;
     }
 
@@ -73,126 +107,191 @@
       position: fixed;
       left: var(--side-margin);
       bottom: 28px;
-      font-size: 14px;
       color: #555;
+      font-size: 14px;
     }
 
     @media (prefers-reduced-motion: reduce) {
-      #phrase { transition: none; }
+      .phrase-layer {
+        transition: none;
+        filter: none;
+        transform: none;
+      }
     }
   </style>
 </head>
 <body>
   <main>
-    <section id="phrase" aria-live="polite">
-      <p class="ko" id="korean"></p>
-      <p class="en" id="english"></p>
+    <section class="phrase-stage" aria-live="polite" aria-atomic="true">
+      <div class="phrase-layer is-visible" data-layer="0">
+        <p class="ko"></p>
+        <p class="en"></p>
+      </div>
+
+      <div class="phrase-layer" data-layer="1" aria-hidden="true">
+        <p class="ko"></p>
+        <p class="en"></p>
+      </div>
     </section>
   </main>
+
   <div id="status" role="status"></div>
 
   <script>
-    const DISPLAY_MS = 8000;
-    const TRANSITION_MS = 1200;
-    const phraseEl = document.getElementById('phrase');
-    const koreanEl = document.getElementById('korean');
-    const englishEl = document.getElementById('english');
-    const statusEl = document.getElementById('status');
+    const CONFIG = {
+      csvPath: './phrases.csv',
+      displayDuration: 8000,
+    };
+
+    const layers = [...document.querySelectorAll('.phrase-layer')];
+    const status = document.getElementById('status');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     let phrases = [];
     let playlist = [];
-    let currentIndex = 0;
+    let activeLayerIndex = 0;
+    let playlistIndex = 0;
 
     function parseCSV(text) {
       const rows = [];
       let row = [];
       let field = '';
-      let inQuotes = false;
+      let isQuoted = false;
 
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const next = text[i + 1];
-        if (char === '"' && inQuotes && next === '"') {
+      for (let index = 0; index < text.length; index += 1) {
+        const character = text[index];
+        const nextCharacter = text[index + 1];
+
+        if (character === '"' && isQuoted && nextCharacter === '"') {
           field += '"';
-          i++;
-        } else if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
+          index += 1;
+        } else if (character === '"') {
+          isQuoted = !isQuoted;
+        } else if (character === ',' && !isQuoted) {
           row.push(field.trim());
           field = '';
-        } else if ((char === '\n' || char === '\r') && !inQuotes) {
-          if (char === '\r' && next === '\n') i++;
+        } else if ((character === '\n' || character === '\r') && !isQuoted) {
+          if (character === '\r' && nextCharacter === '\n') index += 1;
           row.push(field.trim());
-          if (row.some(value => value !== '')) rows.push(row);
+          if (row.some(Boolean)) rows.push(row);
           row = [];
           field = '';
         } else {
-          field += char;
+          field += character;
         }
       }
+
       row.push(field.trim());
-      if (row.some(value => value !== '')) rows.push(row);
+      if (row.some(Boolean)) rows.push(row);
       return rows;
     }
 
     function shuffle(items) {
-      const result = [...items];
-      for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [result[i], result[j]] = [result[j], result[i]];
+      const shuffled = [...items];
+
+      for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
       }
-      return result;
+
+      return shuffled;
     }
 
-    function makePlaylist(previousItem) {
+    function buildPlaylist(previousPhrase) {
       playlist = shuffle(phrases);
-      if (playlist.length > 1 && previousItem && playlist[0] === previousItem) {
+
+      if (playlist.length > 1 && previousPhrase && playlist[0] === previousPhrase) {
         [playlist[0], playlist[1]] = [playlist[1], playlist[0]];
       }
-      currentIndex = 0;
+
+      playlistIndex = 0;
     }
 
-    function showPhrase(item) {
-      koreanEl.textContent = item.korean;
-      englishEl.textContent = item.english;
+    function nextPhrase() {
+      const currentPhrase = playlist[playlistIndex];
+      playlistIndex += 1;
+
+      if (playlistIndex >= playlist.length) {
+        buildPlaylist(currentPhrase);
+      }
+
+      return playlist[playlistIndex];
     }
 
-    function advance() {
-      if (phrases.length < 2) return;
-      phraseEl.classList.add('is-leaving');
-      setTimeout(() => {
-        const previousItem = playlist[currentIndex];
-        currentIndex += 1;
-        if (currentIndex >= playlist.length) makePlaylist(previousItem);
-        showPhrase(playlist[currentIndex]);
-        phraseEl.classList.remove('is-leaving');
-        phraseEl.classList.add('is-entering');
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => phraseEl.classList.remove('is-entering'));
-        });
-      }, TRANSITION_MS);
+    function renderPhrase(layer, phrase) {
+      layer.querySelector('.ko').textContent = phrase.korean;
+      layer.querySelector('.en').textContent = phrase.english;
     }
 
-    async function init() {
+    function transitionTo(phrase) {
+      const outgoingLayer = layers[activeLayerIndex];
+      const incomingLayer = layers[1 - activeLayerIndex];
+
+      renderPhrase(incomingLayer, phrase);
+      incomingLayer.setAttribute('aria-hidden', 'false');
+      outgoingLayer.setAttribute('aria-hidden', 'true');
+
+      incomingLayer.classList.remove('is-visible', 'is-exiting');
+      void incomingLayer.offsetWidth;
+
+      incomingLayer.classList.add('is-visible');
+      outgoingLayer.classList.add('is-exiting');
+      outgoingLayer.classList.remove('is-visible');
+
+      activeLayerIndex = 1 - activeLayerIndex;
+    }
+
+    function scheduleTransition() {
+      window.setTimeout(() => {
+        transitionTo(nextPhrase());
+        scheduleTransition();
+      }, CONFIG.displayDuration);
+    }
+
+    function showError(error) {
+      layers.forEach((layer) => layer.classList.remove('is-visible', 'is-exiting'));
+
+      renderPhrase(layers[0], {
+        korean: '문구를 불러올 수 없습니다.',
+        english: error.message,
+      });
+
+      layers[0].classList.add('is-visible');
+      status.textContent = 'phrases.csv 파일과 CSV 형식을 확인하세요.';
+    }
+
+    async function initialize() {
       try {
-        const response = await fetch('./phrases.csv', { cache: 'no-store' });
-        if (!response.ok) throw new Error('phrases.csv 파일을 찾을 수 없습니다.');
+        const response = await fetch(CONFIG.csvPath, { cache: 'no-store' });
+
+        if (!response.ok) {
+          throw new Error('phrases.csv 파일을 찾을 수 없습니다.');
+        }
 
         phrases = parseCSV(await response.text())
-          .filter(row => row.length >= 2 && row[0] && row[1])
-          .map(row => ({ korean: row[0], english: row[1] }));
+          .filter((row) => row.length >= 2 && row[0] && row[1])
+          .map(([korean, english]) => ({ korean, english }));
 
-        if (!phrases.length) throw new Error('CSV에 표시할 2열 문구가 없습니다.');
-        makePlaylist();
-        showPhrase(playlist[currentIndex]);
-        setInterval(advance, DISPLAY_MS);
+        if (!phrases.length) {
+          throw new Error('CSV에 표시할 2열 문구가 없습니다.');
+        }
+
+        buildPlaylist();
+        renderPhrase(layers[activeLayerIndex], playlist[playlistIndex]);
+
+        if (phrases.length > 1) {
+          scheduleTransition();
+        }
       } catch (error) {
-        koreanEl.textContent = '문구를 불러올 수 없습니다.';
-        englishEl.textContent = error.message;
-        statusEl.textContent = 'phrases.csv 파일과 CSV 형식을 확인하세요.';
+        showError(error);
       }
     }
 
-    init();
+    if (reducedMotion) {
+      document.documentElement.style.setProperty('--transition-duration', '0ms');
+    }
+
+    initialize();
   </script>
 </body>
 </html>
