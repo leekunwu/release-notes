@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSV Phrase Display</title>
+  <style>
+    @font-face {
+      font-family: "Sandoll Gothic";
+      src: local("Sandoll Gothic"), local("SDGothicNeo");
+    }
+
+    :root {
+      --side-margin: clamp(20px, 5vw, 72px);
+      --primary-size: clamp(30px, 5.2vw, 72px);
+      --secondary-size: clamp(18px, 2.7vw, 36px);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      background: #fff;
+      color: #000;
+      font-family: "Sandoll Gothic", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
+    }
+
+    main {
+      min-height: 100svh;
+      padding: 8vh var(--side-margin);
+      display: flex;
+      align-items: center;
+    }
+
+    #phrase {
+      width: 100%;
+      text-align: left;
+      opacity: 1;
+      transform: translateY(0);
+      transition: opacity 900ms ease, transform 900ms cubic-bezier(.22, .61, .36, 1);
+    }
+
+    #phrase.is-leaving {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+
+    #phrase.is-entering {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+
+    .ko {
+      margin: 0;
+      font-size: var(--primary-size);
+      font-weight: 700;
+      line-height: 1.35;
+      letter-spacing: -0.045em;
+      word-break: keep-all;
+    }
+
+    .en {
+      margin: 0.65em 0 0;
+      font-size: var(--secondary-size);
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: -0.015em;
+    }
+
+    #status {
+      position: fixed;
+      left: var(--side-margin);
+      bottom: 28px;
+      font-size: 14px;
+      color: #555;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #phrase { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="phrase" aria-live="polite">
+      <p class="ko" id="korean"></p>
+      <p class="en" id="english"></p>
+    </section>
+  </main>
+  <div id="status" role="status"></div>
+
+  <script>
+    const DISPLAY_MS = 10000;
+    const TRANSITION_MS = 900;
+    const phraseEl = document.getElementById('phrase');
+    const koreanEl = document.getElementById('korean');
+    const englishEl = document.getElementById('english');
+    const statusEl = document.getElementById('status');
+    let phrases = [];
+    let currentIndex = 0;
+
+    function parseCSV(text) {
+      const rows = [];
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const next = text[i + 1];
+        if (char === '"' && inQuotes && next === '"') {
+          field += '"';
+          i++;
+        } else if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          row.push(field.trim());
+          field = '';
+        } else if ((char === '\n' || char === '\r') && !inQuotes) {
+          if (char === '\r' && next === '\n') i++;
+          row.push(field.trim());
+          if (row.some(value => value !== '')) rows.push(row);
+          row = [];
+          field = '';
+        } else {
+          field += char;
+        }
+      }
+      row.push(field.trim());
+      if (row.some(value => value !== '')) rows.push(row);
+      return rows;
+    }
+
+    function showPhrase(index) {
+      const item = phrases[index];
+      koreanEl.textContent = item.korean;
+      englishEl.textContent = item.english;
+    }
+
+    function advance() {
+      if (phrases.length < 2) return;
+      phraseEl.classList.add('is-leaving');
+      setTimeout(() => {
+        currentIndex = (currentIndex + 1) % phrases.length;
+        showPhrase(currentIndex);
+        phraseEl.classList.remove('is-leaving');
+        phraseEl.classList.add('is-entering');
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => phraseEl.classList.remove('is-entering'));
+        });
+      }, TRANSITION_MS);
+    }
+
+    async function init() {
+      try {
+        const response = await fetch('./phrases.csv', { cache: 'no-store' });
+        if (!response.ok) throw new Error('phrases.csv 파일을 찾을 수 없습니다.');
+
+        phrases = parseCSV(await response.text())
+          .filter(row => row.length >= 2 && row[0] && row[1])
+          .map(row => ({ korean: row[0], english: row[1] }));
+
+        if (!phrases.length) throw new Error('CSV에 표시할 2열 문구가 없습니다.');
+        showPhrase(currentIndex);
+        setInterval(advance, DISPLAY_MS);
+      } catch (error) {
+        koreanEl.textContent = '문구를 불러올 수 없습니다.';
+        englishEl.textContent = error.message;
+        statusEl.textContent = 'phrases.csv 파일과 CSV 형식을 확인하세요.';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
